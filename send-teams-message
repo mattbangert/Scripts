@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+
+# Bash script to send messages to Microsoft Teams.
+# Author: Matt Bangert
+
+# Short form: set -e
+set -o errexit
+
+# Return value of a pipeline is the value of the last (rightmost) command to
+# exit with a non-zero status, or zero if all commands in the pipeline exit
+# successfully.
+set -o pipefail
+
+# Debug
+#set -x
+
+############################  BASIC SETUP TOOLS
+# Reset
+Color_off='\033[0m'       # Text Reset
+
+# Regular Colors
+Red='\033[0;31m'
+Blue='\033[0;34m'
+Green='\033[0;32m'
+
+msg() {
+    printf '%b\n' "$1" >&2
+}
+
+success() {
+    msg "${Green}[✔]${Color_off} ${1}${2}"
+}
+
+info() {
+    msg "${Blue}==>${Color_off} ${1}${2}"
+}
+
+error() {
+    msg "${Red}[✘]${Color_off} ${1}${2}"
+    exit 1
+}
+
+warn () {
+    msg "${Red}[✘]${Color_off} ${1}${2}"
+}
+
+###############################################################################
+# _command_exists()
+#
+# Usage:
+#   _command_exists <command-name>
+#
+# Returns:
+#   0  If a command with the given name is defined in the current environment.
+#   1  If not.
+#
+# Information on why `hash` is used here:
+# http://stackoverflow.com/a/677212
+_command_exists() {
+  hash "${1}" 2>/dev/null
+}
+
+program_must_exist() {
+    _command_exists $1
+
+    # throw error on non-zero return value
+    if [ "$?" -ne 0 ]; then
+        error "You must have '$1' installed to continue."
+    fi
+}
+
+usage() {
+    cat << EOD
+Usage: send-teams-message -t "Title" -m "Message contents" -c "Color" -u http://teamsurl.com
+
+Send messages to Microsoft Teams channels
+
+-m: Message body
+-t: Message title
+-c: Message theme color (Optional)
+-u: Teams webhook URL
+-h: Help information
+EOD
+
+exit 0
+}
+
+trap 'error $LINENO' ERR
+
+program_must_exist curl
+
+while getopts "m:t:c:u:h" opt; do
+   case ${opt} in
+     m) 
+      MESSAGE_BODY="$OPTARG"
+     ;;
+     t) 
+      MESSAGE_TITLE="$OPTARG"
+     ;;
+     c) 
+      msgColor="$OPTARG"
+     ;;
+     u)
+      TEAMS_URL="$OPTARG"
+     ;;
+     h)
+      usage
+     ;;
+     \?) 
+       error "Invalid option -$OPTARG" >&2
+     ;;
+     *)
+      usage
+      break
+      ;;
+   esac
+done
+
+# Add/Change the webhook to one you created in Teams
+if [[ -z $TEAMS_URL ]]; then
+    warn "You must provide the Teams webhook URL."
+    usage
+fi
+
+if [[ -z $MESSAGE_TITLE ]]; then
+    warn "You must provide a title for your message."
+    usage
+fi
+
+if [[ -z $MESSAGE_BODY ]]; then
+     warn "You must provide message content."
+     usage
+fi
+
+if [[ -z $msgColor ]]; then
+    info "You did not provide a msg color, setting to a default."
+    msgColor="0078D7"
+fi
+
+# Convert formating.
+MESSAGE=$( echo ${MESSAGE_BODY} | sed 's/"/\"/g' | sed "s/'/\'/g" )
+JSON="{\"title\": \"${MESSAGE_TITLE}\", \"themeColor\": \"${msgColor}\", \"text\": \"${MESSAGE}\" }"
+
+# Post to Microsoft Teams.
+curl -H "Content-Type: application/json" -d "${JSON}" "${TEAMS_URL}"
